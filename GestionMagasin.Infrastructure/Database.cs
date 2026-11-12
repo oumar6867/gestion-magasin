@@ -44,6 +44,21 @@ public sealed class SqliteDatabaseInitializer(SqliteConnectionFactory factory) :
                 await InitializeAsync(ct);
                 return;
             }
+            if (migration.Version == 7)
+            {
+                await transaction.CommitAsync(ct);
+                await ExecuteNoTransactionAsync(connection, "PRAGMA foreign_keys = OFF;", ct);
+                await using var rebuildTransaction = connection.BeginTransaction();
+                try
+                {
+                    await ExecuteAsync(connection, rebuildTransaction, migration.Sql, ct);
+                    await InsertVersionAsync(connection, rebuildTransaction, migration.Version, ct);
+                    await rebuildTransaction.CommitAsync(ct);
+                }
+                finally { await ExecuteNoTransactionAsync(connection, "PRAGMA foreign_keys = ON;", ct); }
+                await InitializeAsync(ct);
+                return;
+            }
             if (migration.Version == 6)
                 await EnsureMovementColumnsAsync(connection, transaction, ct);
             else
