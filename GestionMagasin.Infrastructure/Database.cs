@@ -29,12 +29,28 @@ public sealed class SqliteDatabaseInitializer(SqliteConnectionFactory factory) :
         {
             await using var check = connection.CreateCommand(); check.Transaction = transaction; check.CommandText = "SELECT COUNT(*) FROM VersionSchema WHERE Version = $version"; check.Parameters.AddWithValue("$version", migration.Version);
             if (Convert.ToInt32(await check.ExecuteScalarAsync(ct)) != 0) continue;
+            if (migration.Version == 5)
+            {
+                await transaction.CommitAsync(ct);
+                await ExecuteNoTransactionAsync(connection, "PRAGMA foreign_keys = OFF;", ct);
+                await using var rebuildTransaction = connection.BeginTransaction();
+                try
+                {
+                    await ExecuteAsync(connection, rebuildTransaction, migration.Sql, ct);
+                    await InsertVersionAsync(connection, rebuildTransaction, migration.Version, ct);
+                    await rebuildTransaction.CommitAsync(ct);
+                }
+                finally { await ExecuteNoTransactionAsync(connection, "PRAGMA foreign_keys = ON;", ct); }
+                return await InitializeAsync(ct);
+            }
             await ExecuteAsync(connection, transaction, migration.Sql, ct);
-            await using var insert = connection.CreateCommand(); insert.Transaction = transaction; insert.CommandText = "INSERT INTO VersionSchema(Version, AppliqueLeUtc) VALUES($version, $utc)"; insert.Parameters.AddWithValue("$version", migration.Version); insert.Parameters.AddWithValue("$utc", DateTime.UtcNow.ToString("O")); await insert.ExecuteNonQueryAsync(ct);
+            await InsertVersionAsync(connection, transaction, migration.Version, ct);
         }
         await transaction.CommitAsync(ct);
     }
     static async Task ExecuteAsync(SqliteConnection c, SqliteTransaction tx, string sql, CancellationToken ct = default) { await using var cmd = c.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = sql; await cmd.ExecuteNonQueryAsync(ct); }
+    static async Task ExecuteNoTransactionAsync(SqliteConnection c, string sql, CancellationToken ct) { await using var cmd = c.CreateCommand(); cmd.CommandText = sql; await cmd.ExecuteNonQueryAsync(ct); }
+    static async Task InsertVersionAsync(SqliteConnection c, SqliteTransaction tx, int version, CancellationToken ct) { await using var insert = c.CreateCommand(); insert.Transaction = tx; insert.CommandText = "INSERT INTO VersionSchema(Version, AppliqueLeUtc) VALUES($version, $utc)"; insert.Parameters.AddWithValue("$version", version); insert.Parameters.AddWithValue("$utc", DateTime.UtcNow.ToString("O")); await insert.ExecuteNonQueryAsync(ct); }
 }
 
 public static class DatabasePaths

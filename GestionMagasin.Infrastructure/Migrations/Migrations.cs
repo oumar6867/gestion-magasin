@@ -3,7 +3,7 @@ namespace GestionMagasin.Infrastructure;
 internal sealed record Migration(int Version, string Sql);
 internal static class Migrations
 {
-    public static IReadOnlyList<Migration> All { get; } = new[] { new Migration(1, InitialSql), new Migration(2, SecurityAndStockSql), new Migration(3, SalesSql), new Migration(4, AdministrationSql) };
+    public static IReadOnlyList<Migration> All { get; } = new[] { new Migration(1, InitialSql), new Migration(2, SecurityAndStockSql), new Migration(3, SalesSql), new Migration(4, AdministrationSql), new Migration(5, NullableProductCategorySql) };
     private const string InitialSql = """
 CREATE TABLE Utilisateur (Id TEXT PRIMARY KEY, NomUtilisateur TEXT NOT NULL COLLATE NOCASE UNIQUE, NomComplet TEXT NOT NULL, Role TEXT NOT NULL CHECK (Role IN ('ADMIN','VENDEUR')), Actif INTEGER NOT NULL DEFAULT 1 CHECK (Actif IN (0,1)), CreeLeUtc TEXT NOT NULL, ModifieLeUtc TEXT NOT NULL);
 CREATE TABLE Categorie (Id TEXT PRIMARY KEY, Nom TEXT NOT NULL COLLATE NOCASE UNIQUE, Active INTEGER NOT NULL DEFAULT 1 CHECK (Active IN (0,1)), CreeLeUtc TEXT NOT NULL, ModifieLeUtc TEXT NOT NULL);
@@ -34,5 +34,13 @@ CREATE INDEX IF NOT EXISTS IX_Vente_Statut ON Vente(Statut);
     private const string AdministrationSql = """
 CREATE TABLE IF NOT EXISTS Sauvegarde (Id TEXT PRIMARY KEY, Chemin TEXT NOT NULL, DateUtc TEXT NOT NULL, Type TEXT NOT NULL, Succes INTEGER NOT NULL CHECK (Succes IN (0,1)), Message TEXT);
 CREATE INDEX IF NOT EXISTS IX_Sauvegarde_Date ON Sauvegarde(DateUtc DESC);
+""";
+    private const string NullableProductCategorySql = """
+CREATE TABLE Produit_new (Id TEXT PRIMARY KEY, Reference TEXT NOT NULL COLLATE NOCASE UNIQUE, Nom TEXT NOT NULL, CategorieId TEXT REFERENCES Categorie(Id), PrixVenteFcfa INTEGER NOT NULL CHECK (PrixVenteFcfa > 0), SeuilAlerte INTEGER NOT NULL DEFAULT 0 CHECK (SeuilAlerte >= 0), Actif INTEGER NOT NULL DEFAULT 1 CHECK (Actif IN (0,1)), CreeLeUtc TEXT NOT NULL, ModifieLeUtc TEXT NOT NULL);
+INSERT INTO Produit_new(Id,Reference,Nom,CategorieId,PrixVenteFcfa,SeuilAlerte,Actif,CreeLeUtc,ModifieLeUtc) SELECT Id,Reference,Nom,CategorieId,PrixVenteFcfa,SeuilAlerte,Actif,CreeLeUtc,ModifieLeUtc FROM Produit;
+DROP TABLE Produit;
+ALTER TABLE Produit_new RENAME TO Produit;
+CREATE INDEX IF NOT EXISTS IX_Produit_Categorie ON Produit(CategorieId);
+CREATE INDEX IF NOT EXISTS IX_Produit_Actif ON Produit(Actif);
 """;
 }
