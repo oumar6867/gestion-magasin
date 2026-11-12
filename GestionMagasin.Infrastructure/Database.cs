@@ -41,9 +41,13 @@ public sealed class SqliteDatabaseInitializer(SqliteConnectionFactory factory) :
                     await rebuildTransaction.CommitAsync(ct);
                 }
                 finally { await ExecuteNoTransactionAsync(connection, "PRAGMA foreign_keys = ON;", ct); }
-                return await InitializeAsync(ct);
+                await InitializeAsync(ct);
+                return;
             }
-            await ExecuteAsync(connection, transaction, migration.Sql, ct);
+            if (migration.Version == 6)
+                await EnsureMovementColumnsAsync(connection, transaction, ct);
+            else
+                await ExecuteAsync(connection, transaction, migration.Sql, ct);
             await InsertVersionAsync(connection, transaction, migration.Version, ct);
         }
         await transaction.CommitAsync(ct);
@@ -51,6 +55,13 @@ public sealed class SqliteDatabaseInitializer(SqliteConnectionFactory factory) :
     static async Task ExecuteAsync(SqliteConnection c, SqliteTransaction tx, string sql, CancellationToken ct = default) { await using var cmd = c.CreateCommand(); cmd.Transaction = tx; cmd.CommandText = sql; await cmd.ExecuteNonQueryAsync(ct); }
     static async Task ExecuteNoTransactionAsync(SqliteConnection c, string sql, CancellationToken ct) { await using var cmd = c.CreateCommand(); cmd.CommandText = sql; await cmd.ExecuteNonQueryAsync(ct); }
     static async Task InsertVersionAsync(SqliteConnection c, SqliteTransaction tx, int version, CancellationToken ct) { await using var insert = c.CreateCommand(); insert.Transaction = tx; insert.CommandText = "INSERT INTO VersionSchema(Version, AppliqueLeUtc) VALUES($version, $utc)"; insert.Parameters.AddWithValue("$version", version); insert.Parameters.AddWithValue("$utc", DateTime.UtcNow.ToString("O")); await insert.ExecuteNonQueryAsync(ct); }
+    static async Task EnsureMovementColumnsAsync(SqliteConnection c, SqliteTransaction tx, CancellationToken ct)
+    {
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var info = c.CreateCommand()) { info.Transaction = tx; info.CommandText = "PRAGMA table_info(MouvementStock)"; await using var reader = await info.ExecuteReaderAsync(ct); while (await reader.ReadAsync(ct)) existing.Add(reader.GetString(1)); }
+        foreach (var column in new[] { ("Motif", "TEXT"), ("QuantiteAvant", "INTEGER"), ("QuantiteComptee", "INTEGER") })
+            if (!existing.Contains(column.Item1)) await ExecuteAsync(c, tx, $"ALTER TABLE MouvementStock ADD COLUMN {column.Item1} {column.Item2};", ct);
+    }
 }
 
 public static class DatabasePaths
